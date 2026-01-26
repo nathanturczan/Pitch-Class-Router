@@ -1,6 +1,6 @@
 # Pitch Class Router
 
-A lightweight utility that bridges [Scale Navigator](https://scalenavigator.com) to pitch-class-aware plugins like Fluid Pitch, Chroma, Scaler EQ, Temperance, Auto-Tune, and more.
+A utility that bridges [Scale Navigator](https://scalenavigator.com) to pitch-class-aware plugins like Fluid Pitch, Chroma, Scaler EQ, Temperance, Auto-Tune, and more.
 
 ## What It Does
 
@@ -13,6 +13,35 @@ Many pitch-correction and harmonic plugins expose 12 toggles—one for each pitc
 
 Now when you change chords or scales in Scale Navigator, your plugins update instantly.
 
+## Two Versions
+
+### JUCE Plugin (Recommended)
+
+A native VST3/AU plugin that lives inside your DAW session. Found in the `plugin/` directory.
+
+**Features:**
+- Configurable MIDI input port and channel
+- Configurable MIDI output port and channel
+- Configurable base CC number
+- 12 mapping buttons for MIDI learn
+- Visual pitch class state indicators
+- Settings saved with your project
+
+**Building:**
+```bash
+cd plugin
+cmake -B build
+cmake --build build
+```
+
+Requires CMake 3.22+ and a C++17 compiler. JUCE is fetched automatically.
+
+### Web Version (Lightweight)
+
+A browser-based version using WebMIDI. Just open `index.html` in Chrome.
+
+Good for quick testing or if you prefer running outside the DAW.
+
 ## Compatible Plugins
 
 Any plugin with 12 pitch-class toggles that can be MIDI-mapped:
@@ -24,75 +53,55 @@ Any plugin with 12 pitch-class toggles that can be MIDI-mapped:
 - [Auto-Tune Artist](https://www.antarestech.com/) by Antares
 - Any other plugin with MIDI-mappable pitch-class parameters
 
-## Requirements
-
-- A browser with WebMIDI support (Chrome, Edge, Opera)
-- A virtual MIDI port (e.g., IAC Driver on macOS, loopMIDI on Windows)
-- Scale Navigator Dashboard
-
 ## Setup
 
 ### 1. Create a Virtual MIDI Port
 
-**macOS:** Open Audio MIDI Setup → Window → Show MIDI Studio → double-click IAC Driver → create a port named "INTERSTICES" (or edit the config in the JS file to match your port name).
+**macOS:** Open Audio MIDI Setup > Window > Show MIDI Studio > double-click IAC Driver > create a port (e.g., "INTERSTICES").
 
 **Windows:** Use [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) to create a virtual port.
 
-### 2. Map Your Plugin
+### 2. Load Pitch Class Router
 
-1. Open your DAW and load a pitch-class plugin (e.g., Chroma, Fluid Pitch)
+**Plugin version:** Load Pitch Class Router on a MIDI track. Select your virtual MIDI port and channels in the plugin UI.
+
+**Web version:** Open `index.html` in Chrome. Edit `pitch-class-router.js` to set your port name.
+
+### 3. Map Your Target Plugin
+
+1. Load a pitch-class plugin (e.g., Chroma, Fluid Pitch)
 2. Enter MIDI Map mode (Cmd+M in Ableton Live)
-3. Open `index.html` in Chrome
-4. For each pitch class:
-   - Click the plugin's toggle (e.g., "Note C")
-   - Click the corresponding button in Pitch Class Router (e.g., "0: C")
-5. Exit MIDI Map mode
+3. For each pitch class:
+   - Click the target plugin's toggle (e.g., "Note C")
+   - Click the corresponding button in Pitch Class Router
+4. Exit MIDI Map mode
 
-### 3. Configure Scale Navigator
+### 4. Configure Scale Navigator
 
 In Scale Navigator Dashboard:
-- Set MIDI output to your virtual port (e.g., "IAC Driver INTERSTICES")
-- Set output channel to **7**
+- Set MIDI output to your virtual port
+- Set output channel (default: 7)
 - Enable pitch class output for chords, scales, or both
 
-### 4. Play
+### 5. Play
 
-Change chords or scales in Scale Navigator—the plugin toggles update automatically.
+Change chords or scales in Scale Navigator—the target plugin's toggles update automatically.
 
 ## How It Works
 
 ```
 Scale Navigator                 Pitch Class Router              Your Plugin
-(sends scales)                  (this web app)                  (receives CCs)
+(sends scales)                  (VST3/AU or web app)            (receives CCs)
      │                                │                              │
-     └──[Ch 7 Note On/Off]───────────→│                              │
+     └──[Note On/Off]────────────────→│                              │
         (note % 12 = pitch class)     │                              │
                                       │                              │
-                                      └──[Ch 8 CC 20-31]────────────→│
+                                      └──[CC 20-31]─────────────────→│
                                          (127 = on, 0 = off)         │
 ```
 
-- **Input:** MIDI channel 7, Note On/Off messages
-- **Output:** MIDI channel 8, CC 20–31 (C=CC20, C#=CC21, ... B=CC31)
-
-## Configuration
-
-Edit the top of `pitch-class-router.js` to customize:
-
-```javascript
-const PORT_NAME_MATCH = "INTERSTICES";  // Virtual port name to match
-const SCALE_IN_CHANNEL = 7;              // Channel from Scale Navigator
-const OUT_CHANNEL = 8;                   // Channel to plugin
-const BASE_CC = 20;                      // First CC number (C)
-```
-
-## Roadmap
-
-This web-based version is a lightweight proof of concept. A proper JUCE-based plugin/standalone app is planned for:
-- Native performance
-- VST3/AU/AAX format
-- Cross-platform distribution
-- Integration with Scale Navigator store
+- **Input:** Note On/Off messages (pitch class = note number mod 12)
+- **Output:** CC messages (default CC 20-31 for C-B, configurable)
 
 ## Part of the Scale Navigator Family
 
