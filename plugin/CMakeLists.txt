@@ -9,13 +9,14 @@ include(FetchContent)
 FetchContent_Declare(
     JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG 7.0.9
+    GIT_TAG 8.0.4
 )
 FetchContent_MakeAvailable(JUCE)
 
 # Plugin target
 juce_add_plugin(PitchClassRouter
     COMPANY_NAME "Scale Navigator"
+    BUNDLE_ID "com.scalenavigator.pitchclassrouter"
     PLUGIN_MANUFACTURER_CODE Snav
     PLUGIN_CODE Pcrt
     FORMATS VST3 AU Standalone
@@ -25,6 +26,8 @@ juce_add_plugin(PitchClassRouter
     NEEDS_MIDI_OUTPUT TRUE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
 )
+
+juce_generate_juce_header(PitchClassRouter)
 
 target_sources(PitchClassRouter
     PRIVATE
