@@ -4,6 +4,9 @@ project(PitchClassRouter VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Build universal binary for macOS (Intel + Apple Silicon)
+set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+
 # Fetch JUCE
 include(FetchContent)
 FetchContent_Declare(
@@ -51,4 +54,20 @@ target_link_libraries(PitchClassRouter
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+)
+
+# Post-build: Install AU to ~/Library/Audio/Plug-Ins/Components/
+add_custom_command(TARGET PitchClassRouter_AU POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "$<TARGET_BUNDLE_DIR:PitchClassRouter_AU>"
+        "$ENV{HOME}/Library/Audio/Plug-Ins/Components/Pitch Class Router.component"
+    COMMENT "Installing AU to ~/Library/Audio/Plug-Ins/Components/"
+)
+
+# Post-build: Install VST3 to ~/Library/Audio/Plug-Ins/VST3/
+add_custom_command(TARGET PitchClassRouter_VST3 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "$<TARGET_BUNDLE_DIR:PitchClassRouter_VST3>"
+        "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Pitch Class Router.vst3"
+    COMMENT "Installing VST3 to ~/Library/Audio/Plug-Ins/VST3/"
 )
