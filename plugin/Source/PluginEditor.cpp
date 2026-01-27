@@ -3,8 +3,6 @@
 PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    setSize(500, 400);
-
     // MIDI Input
     midiInputLabel.setText("MIDI Input:", juce::dontSendNotification);
     midiInputLabel.setJustificationType(juce::Justification::right);
@@ -102,6 +100,9 @@ PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
 
     // Refresh device lists
     refreshMidiDevices();
+
+    // Set size AFTER all components are created (resized() accesses mappingButtons/stateIndicators)
+    setSize(500, 400);
 
     // Start timer for UI updates
     startTimerHz(10);

@@ -11,7 +11,9 @@ const juce::StringArray& PitchClassRouterProcessor::getPitchClassNames()
 }
 
 PitchClassRouterProcessor::PitchClassRouterProcessor()
-    : AudioProcessor(BusesProperties())
+    : AudioProcessor(BusesProperties()
+                     .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                     .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
     pitchClassState.fill(false);
 }
@@ -30,20 +32,35 @@ void PitchClassRouterProcessor::releaseResources()
 {
 }
 
-bool PitchClassRouterProcessor::isBusesLayoutSupported(const BusesLayout&) const
+bool PitchClassRouterProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
+    // Accept stereo or mono configurations
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
+        && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+
+    // Input and output must match
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+
     return true;
 }
 
-void PitchClassRouterProcessor::processBlock(juce::AudioBuffer<float>&,
+void PitchClassRouterProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
+    // Pass audio through unchanged (we're only processing MIDI)
+    juce::ScopedNoDenormals noDenormals;
+
     // Add any pending MIDI messages from external input
     {
         juce::ScopedLock lock(midiLock);
         midiMessages.addEvents(pendingMidiMessages, 0, -1, 0);
         pendingMidiMessages.clear();
     }
+
+    // Audio passthrough - nothing to do, buffer already contains input
+    (void)buffer;
 }
 
 juce::AudioProcessorEditor* PitchClassRouterProcessor::createEditor()
