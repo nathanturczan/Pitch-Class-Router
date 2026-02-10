@@ -170,6 +170,27 @@ file ~/Library/Audio/Plug-Ins/VST3/Pitch\ Class\ Router.vst3/Contents/MacOS/Pitc
 # Should show: Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit bundle x86_64] [arm64:Mach-O 64-bit bundle arm64]
 ```
 
+## Windows Porting Notes (2026-02-10)
+
+### Changes Made
+- **CMakeLists.txt**: Wrapped `CMAKE_OSX_ARCHITECTURES` and macOS post-build install commands (AU + VST3 copy to `~/Library/`) in `if(APPLE)` guards. Without this, CMake fails on Windows because the `PitchClassRouter_AU` target doesn't exist.
+- No source code changes were required — the plugin is pure C++ JUCE with no platform-specific code.
+
+### macOS Impact
+- None. The `if(APPLE)` guards are no-ops on macOS — the exact same code paths execute as before. Verify by rebuilding on Mac if concerned.
+
+### Windows Build
+```bash
+cd plugin
+cmake -B build -G "Visual Studio 17 2022"
+cmake --build build --config Release
+# Output: plugin/build/PitchClassRouter_artefacts/Release/VST3/Pitch Class Router.vst3
+# Standalone: plugin/build/PitchClassRouter_artefacts/Release/Standalone/Pitch Class Router.exe
+```
+
+### Windows VST3 Install
+Copy VST3 to `C:\Program Files\Common Files\VST3\` (requires admin).
+
 ## GitHub
 
 - **Repo:** https://github.com/nathanturczan/Pitch-Class-Router
