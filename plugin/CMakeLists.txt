@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(PitchClassRouter VERSION 1.0.1)
+project(PitchClassRouter VERSION 1.0.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,13 @@ juce_add_plugin(PitchClassRouter
 
 juce_generate_juce_header(PitchClassRouter)
 
+# Add binary resources (fonts)
+juce_add_binary_data(PitchClassRouterBinaryData
+    SOURCES
+        Source/InterRegular.ttf
+        Source/InterBold.ttf
+)
+
 target_sources(PitchClassRouter
     PRIVATE
         Source/PluginProcessor.cpp
@@ -52,6 +59,7 @@ target_compile_definitions(PitchClassRouter
 
 target_link_libraries(PitchClassRouter
     PRIVATE
+        PitchClassRouterBinaryData
         juce::juce_audio_utils
         juce::juce_audio_processors
     PUBLIC

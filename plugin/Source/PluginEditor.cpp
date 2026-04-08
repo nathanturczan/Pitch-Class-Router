@@ -3,14 +3,14 @@
 PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    // Setup branding labels
+    // Setup branding labels (Inter font, matches Tonalign)
     mBrandLabel.setText("Scale Navigator", juce::dontSendNotification);
-    mBrandLabel.setFont(juce::Font(20.0f));
+    mBrandLabel.setFont(getInterFont(20.0f));
     mBrandLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(mBrandLabel);
 
     mProductLabel.setText("Pitch Class Router", juce::dontSendNotification);
-    mProductLabel.setFont(juce::Font(20.0f, juce::Font::bold));
+    mProductLabel.setFont(getInterFont(20.0f, juce::Font::bold));
     mProductLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(mProductLabel);
 
