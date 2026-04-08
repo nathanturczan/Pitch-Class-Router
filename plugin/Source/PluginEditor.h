@@ -39,6 +39,10 @@ private:
     // Status display
     juce::Label statusLabel;
 
+    // Branding labels
+    juce::Label mBrandLabel;      // "Scale Navigator"
+    juce::Label mProductLabel;    // "Pitch Class Router"
+
     // Pitch class state indicators
     juce::OwnedArray<juce::Label> stateIndicators;
 

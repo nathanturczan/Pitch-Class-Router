@@ -3,6 +3,17 @@
 PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
+    // Setup branding labels
+    mBrandLabel.setText("Scale Navigator", juce::dontSendNotification);
+    mBrandLabel.setFont(juce::Font(20.0f));
+    mBrandLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(mBrandLabel);
+
+    mProductLabel.setText("Pitch Class Router", juce::dontSendNotification);
+    mProductLabel.setFont(juce::Font(20.0f, juce::Font::bold));
+    mProductLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(mProductLabel);
+
     // MIDI Input
     midiInputLabel.setText("MIDI Input:", juce::dontSendNotification);
     midiInputLabel.setJustificationType(juce::Justification::right);
@@ -179,11 +190,6 @@ void PitchClassRouterEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1a1a1a));
 
-    // Title
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(18.0f, juce::Font::bold));
-    g.drawText("Pitch Class Router", 0, 10, getWidth(), 25, juce::Justification::centred);
-
     // Divider line
     g.setColour(juce::Colours::grey);
     g.drawLine(20, 180, getWidth() - 20, 180, 1.0f);
@@ -191,8 +197,17 @@ void PitchClassRouterEditor::paint(juce::Graphics& g)
 
 void PitchClassRouterEditor::resized()
 {
-    auto area = getLocalBounds().reduced(20);
-    area.removeFromTop(35); // Title space
+    auto bounds = getLocalBounds();
+
+    // Top header area with branding (matches Tonalign)
+    auto topBar = bounds.removeFromTop(56);
+    auto brandArea = topBar.removeFromLeft(200);
+    brandArea = brandArea.reduced(10, 8);  // 10px left margin, 8px top/bottom
+    mBrandLabel.setBounds(brandArea.removeFromTop(22).withTrimmedTop(2));
+    mProductLabel.setBounds(brandArea.removeFromTop(22));
+
+    auto area = bounds.reduced(20);
+    area.removeFromTop(5); // Space after branding
 
     // MIDI Input row
     auto inputRow = area.removeFromTop(30);
