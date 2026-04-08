@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
 DIST_DIR="$PROJECT_ROOT/dist"
-VERSION="1.0.0"
+VERSION="1.0.2"
 DMG_NAME="PitchClassRouter-${VERSION}-macOS"
 PLUGIN_NAME="Pitch Class Router"
 
