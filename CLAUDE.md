@@ -191,6 +191,97 @@ cmake --build build --config Release
 ### Windows VST3 Install
 Copy VST3 to `C:\Program Files\Common Files\VST3\` (requires admin).
 
+## 🐧 LINUX BUILD
+
+Linux work lives on the `linux-support` branch. Targets SteamOS first; builds run on any glibc ≥ 2.38 distro with `alsa-lib` installed. Pitch Class Router is the cleanest port of the family — pure JUCE Components UI with zero platform-specific source code, so no WebView wrapper needed.
+
+### Prerequisites (one-time on Steam Deck)
+
+```bash
+# After SteamOS recovery: restore passwordless sudo, init keyring (see vibecoding/plugin-linux-port.md)
+sudo steamos-readonly disable    # may already be disabled
+sudo pacman-key --init && sudo pacman-key --populate archlinux && sudo pacman-key --populate holo
+
+# Build toolchain + minimal JUCE deps. Do NOT install jack2 — conflicts with pipewire-jack (pipewire provides the jack interface JUCE needs).
+sudo pacman -S --needed --overwrite '*' \
+  cmake gcc make pkgconf ninja \
+  freetype2 fontconfig alsa-lib curl \
+  libx11 libxcomposite libxcursor libxinerama libxrandr libxrender \
+  zlib bzip2 libpng harfbuzz brotli xorgproto glib2
+```
+
+If configure fails with `fatal error: <some_header.h>: No such file`, the SteamOS overlay has lost a `.h`/`.pc`. Force-rewrite: `sudo pacman -S --overwrite '*' <pkgname>`. Bulk-detect script in `~/github/vibecoding/plugin-linux-port.md`.
+
+### Build
+
+```bash
+cmake -S /home/deck/github/Pitch-Class-Router/plugin \
+      -B /home/deck/github/Pitch-Class-Router/plugin/build \
+      -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build /home/deck/github/Pitch-Class-Router/plugin/build -j2
+```
+
+JUCE auto-installs the VST3 to `~/.vst3/Pitch Class Router.vst3/`. Standalone is at:
+`plugin/build/PitchClassRouter_artefacts/Release/Standalone/Pitch Class Router`
+
+A custom CMake target (`PitchClassRouter_FixModuleInfo`) runs `scripts/fix-moduleinfo.py` against the bundle in BOTH the build dir and `~/.vst3/...` — JUCE's `COPY_PLUGIN_AFTER_BUILD` runs *before* custom targets, so we have to fix both.
+
+### Verify
+
+After every build, run the Linux section of `.claude/commands/plugin-verify.md`. Key Linux checks:
+
+- `file <vst3>/Contents/x86_64-linux/Pitch\ Class\ Router.so` → `ELF 64-bit LSB shared object, x86-64`
+- `ldd ... | grep "not found"` → empty
+- `objdump -T ... | grep GLIBC_ | sort -V -u | tail -3` → max ≤ `GLIBC_2.38`
+- `python3 -m json.tool` on moduleinfo.json — VALID in BOTH build and `~/.vst3` dirs
+- `strings ... | grep -E "^1\.[0-9]+\.[0-9]+$"` — version string present
+
+### Run
+
+```bash
+# Standalone
+"/home/deck/github/Pitch-Class-Router/plugin/build/PitchClassRouter_artefacts/Release/Standalone/Pitch Class Router"
+
+# REAPER (will scan ~/.vst3 automatically)
+/opt/REAPER/reaper
+```
+
+No compositor env vars needed — there's no WebView, just JUCE's native X11 rendering.
+
+### MIDI port enumeration on Linux
+
+JUCE's `MidiInput::getAvailableDevices()` / `MidiOutput::getAvailableDevices()` enumerate ALSA sequencer clients. On a fresh SteamOS, you'll see at minimum:
+
+- `Midi Through Port-0` — kernel loopback, always present
+- `VirMIDI 2-0` … `VirMIDI 2-3` — if `snd-virmidi` is loaded
+
+To create more virtual ports for routing between apps:
+
+```bash
+sudo modprobe snd-virmidi   # creates 4 virtual MIDI cables
+qpwgraph                     # GUI patchbay (PipeWire) for connecting them
+```
+
+Hardware MIDI devices (USB MIDI controllers, etc.) appear automatically when plugged in.
+
+`aconnect -l` shows the current ALSA sequencer graph from the command line — useful for debugging "why doesn't my port show up in the dropdown".
+
+### Package
+
+```bash
+bash /home/deck/github/Pitch-Class-Router/plugin/scripts/create-installer-linux.sh
+# → build/pitch-class-router-1.0.2-linux-x86_64.tar.gz
+```
+
+The tarball contains the VST3 bundle, the standalone binary, an `install.sh` (checks for `libasound`, copies VST3 to `~/.vst3/` and standalone to `~/.local/bin/pitch-class-router`), and a README.
+
+### Linux-specific notes
+
+- No webkit2gtk dependency on this plugin (unlike Dashboard-Plugin) — only `libasound` at runtime.
+- VST3 install path on Linux is `~/.vst3/<name>.vst3/` (writable, no admin).
+- AU is macOS-only; on Linux only VST3 + Standalone are built.
+- Plugin name has a space ("Pitch Class Router") — quote paths in shell scripts.
+
 ## GitHub
 
 - **Repo:** https://github.com/nathanturczan/Pitch-Class-Router
