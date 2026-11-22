@@ -17,10 +17,16 @@ PitchClassRouterProcessor::PitchClassRouterProcessor()
 {
     for (auto& state : pitchClassState)
         state.store(false);
+
+    // Retry a missing device when the system's MIDI device list changes
+    if (juce::MessageManager::getInstance()->isThisTheMessageThread())
+        deviceListConnection = juce::MidiDeviceListConnection::make([this] { refreshMidiConnections(); });
 }
 
 PitchClassRouterProcessor::~PitchClassRouterProcessor()
 {
+    deviceListConnection.reset();
+
     if (midiInput)
         midiInput->stop();
 }
@@ -103,6 +109,8 @@ void PitchClassRouterProcessor::setStateInformation(const void* data, int sizeIn
                 setMidiInput(inputName);
             if (outputName.isNotEmpty())
                 setMidiOutput(outputName);
+
+            ++settingsVersion;
         }
     }
 }
@@ -204,7 +212,9 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
     // Notes held on the previous device will never get their note-offs
     resetPitchClassState();
 
-    currentMidiInputName = "";
+    // Remember the selection even if the device is missing, so it is not lost on the next save
+    currentMidiInputName = deviceName;
+    midiInputOpen = false;
 
     for (auto& device : juce::MidiInput::getAvailableDevices())
     {
@@ -214,11 +224,24 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
             if (midiInput)
             {
                 midiInput->start();
-                currentMidiInputName = deviceName;
+                midiInputOpen = true;
             }
             break;
         }
     }
+}
+
+void PitchClassRouterProcessor::refreshMidiConnections()
+{
+    if (currentMidiInputName.isNotEmpty()
+        && getAvailableMidiInputs().contains(currentMidiInputName) != midiInputOpen.load())
+        setMidiInput(currentMidiInputName);
+
+    if (currentMidiOutputName.isNotEmpty()
+        && getAvailableMidiOutputs().contains(currentMidiOutputName) != midiOutputOpen.load())
+        setMidiOutput(currentMidiOutputName);
+
+    ++settingsVersion;
 }
 
 void PitchClassRouterProcessor::setMidiOutput(const juce::String& deviceName)
@@ -236,7 +259,9 @@ void PitchClassRouterProcessor::setMidiOutput(const juce::String& deviceName)
         }
     }
 
-    currentMidiOutputName = newOutput ? deviceName : juce::String();
+    // Remember the selection even if the device is missing, so it is not lost on the next save
+    currentMidiOutputName = deviceName;
+    midiOutputOpen = newOutput != nullptr;
 
     {
         juce::ScopedLock lock(outputLock);

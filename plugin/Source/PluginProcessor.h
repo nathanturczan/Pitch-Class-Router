@@ -44,8 +44,17 @@ public:
 
     void setMidiInput(const juce::String& deviceName);
     void setMidiOutput(const juce::String& deviceName);
+    // The selected device names; kept (and saved) even while the device is missing
     juce::String getCurrentMidiInput() const { return currentMidiInputName; }
     juce::String getCurrentMidiOutput() const { return currentMidiOutputName; }
+    bool isMidiInputOpen() const { return midiInputOpen.load(); }
+    bool isMidiOutputOpen() const { return midiOutputOpen.load(); }
+
+    // Reopens a selected device that has come back, closes one that has gone away
+    void refreshMidiConnections();
+
+    // Incremented when settings change behind the editor's back (state restore, device list change)
+    int getSettingsVersion() const { return settingsVersion.load(); }
 
     // Channel settings (1-16)
     void setInputChannel(int channel);
@@ -72,6 +81,10 @@ private:
     std::unique_ptr<juce::MidiOutput> midiOutput;
     juce::String currentMidiInputName;
     juce::String currentMidiOutputName;
+    std::atomic<bool> midiInputOpen { false };
+    std::atomic<bool> midiOutputOpen { false };
+    std::atomic<int> settingsVersion { 0 };
+    juce::MidiDeviceListConnection deviceListConnection;
 
     // Channel settings (1-16)
     // Atomic: written by the UI, read by the MIDI-input thread

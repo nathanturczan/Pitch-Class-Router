@@ -61,6 +61,8 @@ private:
     // Pitch class state indicators
     juce::OwnedArray<juce::Label> stateIndicators;
 
+    int lastSettingsVersion = 0;
+
     void refreshMidiDevices();
     void updateStatus();
 
