@@ -87,12 +87,16 @@ private:
     // Guards midiOutput (swapped by the UI while the MIDI-input thread sends to it)
     juce::CriticalSection outputLock;
 
-    // Mutex for thread safety
+    // Serialises the threads that queue CCs (MIDI input, UI); never taken in processBlock
     juce::CriticalSection midiLock;
 
-    // Pending MIDI messages to send in processBlock
-    juce::MidiBuffer pendingMidiMessages;
+    // Pending CCs to send in processBlock: fixed-size FIFO read lock-free by the audio thread
+    struct PendingCC { int channel, controller, value; };
+    static constexpr int pendingFifoSize = 1024;
+    juce::AbstractFifo pendingFifo { pendingFifoSize };
+    std::array<PendingCC, pendingFifoSize> pendingEvents {};
 
+    void queueForHost(int channel, int ccNumber, int value);
     void sendPitchClassCC(int pitchClass, bool isOn);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchClassRouterProcessor)

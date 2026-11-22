@@ -53,11 +53,14 @@ void PitchClassRouterProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // Pass audio through unchanged (we're only processing MIDI)
     juce::ScopedNoDenormals noDenormals;
 
-    // Add any pending MIDI messages from external input
+    // Add any pending MIDI messages from external input (no lock on the audio thread)
     {
-        juce::ScopedLock lock(midiLock);
-        midiMessages.addEvents(pendingMidiMessages, 0, -1, 0);
-        pendingMidiMessages.clear();
+        const auto scope = pendingFifo.read(pendingFifo.getNumReady());
+        scope.forEach([&](int index)
+        {
+            const auto& cc = pendingEvents[(size_t) index];
+            midiMessages.addEvent(juce::MidiMessage::controllerEvent(cc.channel, cc.controller, cc.value), 0);
+        });
     }
 
     // Audio passthrough - nothing to do, buffer already contains input
@@ -130,8 +133,9 @@ void PitchClassRouterProcessor::sendPitchClassCC(int pitchClass, bool isOn)
 {
     int ccNumber = baseCC + pitchClass;
     int value = isOn ? 127 : 0;
+    int channel = outputChannel;
 
-    auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, value);
+    auto ccMessage = juce::MidiMessage::controllerEvent(channel, ccNumber, value);
 
     // Send to external MIDI output if configured
     {
@@ -141,10 +145,17 @@ void PitchClassRouterProcessor::sendPitchClassCC(int pitchClass, bool isOn)
     }
 
     // Also queue for plugin output (so it goes through DAW for MIDI mapping)
-    {
-        juce::ScopedLock lock(midiLock);
-        pendingMidiMessages.addEvent(ccMessage, 0);
-    }
+    queueForHost(channel, ccNumber, value);
+}
+
+void PitchClassRouterProcessor::queueForHost(int channel, int ccNumber, int value)
+{
+    juce::ScopedLock lock(midiLock);
+
+    // If the host is not calling processBlock and the FIFO is full, the event is dropped
+    const auto scope = pendingFifo.write(1);
+    if (scope.blockSize1 > 0)
+        pendingEvents[(size_t) scope.startIndex1] = { channel, ccNumber, value };
 }
 
 juce::StringArray PitchClassRouterProcessor::getAvailableMidiInputs() const
@@ -234,7 +245,8 @@ void PitchClassRouterProcessor::sendMappingCC(int pitchClass)
 
     // Send CC with value 127 for mapping purposes
     int ccNumber = baseCC + pitchClass;
-    auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, 127);
+    int channel = outputChannel;
+    auto ccMessage = juce::MidiMessage::controllerEvent(channel, ccNumber, 127);
 
     {
         juce::ScopedLock lock(outputLock);
@@ -242,10 +254,7 @@ void PitchClassRouterProcessor::sendMappingCC(int pitchClass)
             midiOutput->sendMessageNow(ccMessage);
     }
 
-    {
-        juce::ScopedLock lock(midiLock);
-        pendingMidiMessages.addEvent(ccMessage, 0);
-    }
+    queueForHost(channel, ccNumber, 127);
 }
 
 bool PitchClassRouterProcessor::getPitchClassState(int pitchClass) const
