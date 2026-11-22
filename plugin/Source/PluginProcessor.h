@@ -53,7 +53,7 @@ public:
     int getInputChannel() const { return inputChannel; }
     int getOutputChannel() const { return outputChannel; }
 
-    // Base CC (default 20, so C=CC20, C#=CC21, ..., B=CC31)
+    // Base CC (default 20, so C=CC20, C#=CC21, ..., B=CC31), limited to 0-108
     void setBaseCC(int cc);
     int getBaseCC() const { return baseCC; }
 

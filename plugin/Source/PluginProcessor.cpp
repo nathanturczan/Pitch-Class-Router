@@ -93,7 +93,7 @@ void PitchClassRouterProcessor::setStateInformation(const void* data, int sizeIn
             juce::String outputName = state.getProperty("midiOutput", "");
             inputChannel = state.getProperty("inputChannel", 7);
             outputChannel = state.getProperty("outputChannel", 8);
-            baseCC = state.getProperty("baseCC", 20);
+            setBaseCC(state.getProperty("baseCC", 20));
 
             if (inputName.isNotEmpty())
                 setMidiInput(inputName);
@@ -214,7 +214,7 @@ void PitchClassRouterProcessor::setOutputChannel(int channel)
 
 void PitchClassRouterProcessor::setBaseCC(int cc)
 {
-    baseCC = juce::jlimit(0, 119, cc); // Max CC119 so CC+11 doesn't exceed 127
+    baseCC = juce::jlimit(0, 108, cc); // Max CC108 so CC+11 stays below the channel-mode messages (CC 120-127)
 }
 
 void PitchClassRouterProcessor::sendMappingCC(int pitchClass)

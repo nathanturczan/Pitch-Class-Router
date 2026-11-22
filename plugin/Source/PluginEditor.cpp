@@ -75,7 +75,7 @@ PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     baseCCLabel.setJustificationType(juce::Justification::right);
     addAndMakeVisible(baseCCLabel);
 
-    for (int i = 0; i <= 116; ++i)
+    for (int i = 0; i <= 108; ++i)
         baseCCCombo.addItem("CC " + juce::String(i), i + 1);
     baseCCCombo.setSelectedId(processor.getBaseCC() + 1, juce::dontSendNotification);
     baseCCCombo.onChange = [this] {
