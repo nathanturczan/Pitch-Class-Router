@@ -95,7 +95,7 @@ void PitchClassRouterProcessor::setStateInformation(const void* data, int sizeIn
         {
             juce::String inputName = state.getProperty("midiInput", "");
             juce::String outputName = state.getProperty("midiOutput", "");
-            inputChannel = (int) state.getProperty("inputChannel", 7);
+            setInputChannel(state.getProperty("inputChannel", 7));
             outputChannel = (int) state.getProperty("outputChannel", 8);
             setBaseCC(state.getProperty("baseCC", 20));
 
@@ -114,19 +114,38 @@ void PitchClassRouterProcessor::handleIncomingMidiMessage(juce::MidiInput*,
     if (!message.isNoteOnOrOff())
         return;
 
+    juce::ScopedLock lock(stateLock);
+
     int channel = message.getChannel(); // 1-16
     if (channel != inputChannel)
         return;
 
     int noteNumber = message.getNoteNumber();
     int pitchClass = noteNumber % 12;
-    bool isOn = message.isNoteOn() && message.getVelocity() > 0;
+    heldNotes[(size_t) noteNumber] = message.isNoteOn() && message.getVelocity() > 0;
+
+    // The pitch class stays on while any note of that pitch class is still held
+    bool isOn = false;
+    for (int note = pitchClass; note < 128; note += 12)
+        isOn = isOn || heldNotes[(size_t) note];
 
     // Only send if state changed
     if (pitchClassState[(size_t) pitchClass].exchange(isOn) != isOn)
     {
         sendPitchClassCC(pitchClass, isOn);
     }
+}
+
+void PitchClassRouterProcessor::resetPitchClassState()
+{
+    juce::ScopedLock lock(stateLock);
+
+    heldNotes.fill(false);
+
+    // Turn off whatever was on, so the target plugin does not keep stale toggles
+    for (int pitchClass = 0; pitchClass < 12; ++pitchClass)
+        if (pitchClassState[(size_t) pitchClass].exchange(false))
+            sendPitchClassCC(pitchClass, false);
 }
 
 void PitchClassRouterProcessor::sendPitchClassCC(int pitchClass, bool isOn)
@@ -182,6 +201,9 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
         midiInput.reset();
     }
 
+    // Notes held on the previous device will never get their note-offs
+    resetPitchClassState();
+
     currentMidiInputName = "";
 
     for (auto& device : juce::MidiInput::getAvailableDevices())
@@ -225,7 +247,16 @@ void PitchClassRouterProcessor::setMidiOutput(const juce::String& deviceName)
 
 void PitchClassRouterProcessor::setInputChannel(int channel)
 {
-    inputChannel = juce::jlimit(1, 16, channel);
+    channel = juce::jlimit(1, 16, channel);
+
+    juce::ScopedLock lock(stateLock);
+
+    if (channel == inputChannel)
+        return;
+
+    // Notes held on the previous channel will never get their note-offs
+    resetPitchClassState();
+    inputChannel = channel;
 }
 
 void PitchClassRouterProcessor::setOutputChannel(int channel)

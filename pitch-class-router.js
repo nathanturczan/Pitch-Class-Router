@@ -26,6 +26,10 @@ let midiOutput = null;   // output to DAW / plugin
 // current on/off state for each pitch class
 const pcState = new Array(12).fill(false);
 
+// notes currently held on the input channel; a pitch class stays on
+// while any of its notes is still held
+const heldNotes = new Array(128).fill(false);
+
 // ===== UI SETUP =====
 
 const statusEl = document.getElementById("status");
@@ -140,13 +144,12 @@ function handleScaleMessage(event) {
 
   const pcIndex = note % 12;
 
-  let isOn;
-  if (msgType === 0x80 || velocity === 0) {
-    // Note Off
-    isOn = false;
-  } else {
-    // Note On with velocity > 0
-    isOn = true;
+  // Note Off (or Note On with velocity 0) releases the note.
+  heldNotes[note & 0x7f] = !(msgType === 0x80 || velocity === 0);
+
+  let isOn = false;
+  for (let n = pcIndex; n < 128; n += 12) {
+    if (heldNotes[n]) isOn = true;
   }
 
   if (pcState[pcIndex] === isOn) {

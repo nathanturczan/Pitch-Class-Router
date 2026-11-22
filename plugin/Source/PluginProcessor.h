@@ -84,6 +84,12 @@ private:
     // Pitch class state (12 elements, one per pitch class)
     std::array<std::atomic<bool>, 12> pitchClassState;
 
+    // Notes currently held on the input channel; a pitch class is on while any of its notes is held
+    std::array<bool, 128> heldNotes {};
+
+    // Guards heldNotes and the input channel against changes while a note is being handled
+    juce::CriticalSection stateLock;
+
     // Guards midiOutput (swapped by the UI while the MIDI-input thread sends to it)
     juce::CriticalSection outputLock;
 
@@ -98,6 +104,7 @@ private:
 
     void queueForHost(int channel, int ccNumber, int value);
     void sendPitchClassCC(int pitchClass, bool isOn);
+    void resetPitchClassState();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchClassRouterProcessor)
 };
