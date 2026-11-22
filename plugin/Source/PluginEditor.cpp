@@ -75,7 +75,7 @@ PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     baseCCLabel.setJustificationType(juce::Justification::right);
     addAndMakeVisible(baseCCLabel);
 
-    for (int i = 0; i <= 116; ++i)
+    for (int i = 0; i <= 108; ++i)
         baseCCCombo.addItem("CC " + juce::String(i), i + 1);
     baseCCCombo.setSelectedId(processor.getBaseCC() + 1, juce::dontSendNotification);
     baseCCCombo.onChange = [this] {
@@ -109,7 +109,9 @@ PitchClassRouterEditor::PitchClassRouterEditor(PitchClassRouterProcessor& p)
     statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible(statusLabel);
 
-    // Refresh device lists
+    // Refresh device lists (reopening a saved device that has come back)
+    processor.refreshMidiConnections();
+    lastSettingsVersion = processor.getSettingsVersion();
     refreshMidiDevices();
 
     // Set size AFTER all components are created (resized() accesses mappingButtons/stateIndicators)
@@ -135,6 +137,12 @@ void PitchClassRouterEditor::refreshMidiDevices()
         if (inputs[i] == processor.getCurrentMidiInput())
             selectedInput = i + 1;
     }
+    if (selectedInput < 0 && processor.getCurrentMidiInput().isNotEmpty())
+    {
+        // Saved device is missing: show it rather than an empty selection
+        selectedInput = inputs.size() + 1;
+        midiInputCombo.addItem(processor.getCurrentMidiInput() + " (not connected)", selectedInput);
+    }
     if (selectedInput > 0)
         midiInputCombo.setSelectedId(selectedInput, juce::dontSendNotification);
 
@@ -147,12 +155,27 @@ void PitchClassRouterEditor::refreshMidiDevices()
         if (outputs[i] == processor.getCurrentMidiOutput())
             selectedOutput = i + 1;
     }
+    if (selectedOutput < 0 && processor.getCurrentMidiOutput().isNotEmpty())
+    {
+        selectedOutput = outputs.size() + 1;
+        midiOutputCombo.addItem(processor.getCurrentMidiOutput() + " (not connected)", selectedOutput);
+    }
     if (selectedOutput > 0)
         midiOutputCombo.setSelectedId(selectedOutput, juce::dontSendNotification);
 }
 
 void PitchClassRouterEditor::timerCallback()
 {
+    // Settings changed behind our back (state restored, MIDI device list changed)
+    if (lastSettingsVersion != processor.getSettingsVersion())
+    {
+        lastSettingsVersion = processor.getSettingsVersion();
+        refreshMidiDevices();
+        inputChannelCombo.setSelectedId(processor.getInputChannel(), juce::dontSendNotification);
+        outputChannelCombo.setSelectedId(processor.getOutputChannel(), juce::dontSendNotification);
+        baseCCCombo.setSelectedId(processor.getBaseCC() + 1, juce::dontSendNotification);
+    }
+
     updateStatus();
 
     // Update pitch class state indicators
@@ -175,11 +198,15 @@ void PitchClassRouterEditor::updateStatus()
     else
     {
         if (inputName.isNotEmpty())
+        {
             status += "IN: " + inputName + " Ch" + juce::String(processor.getInputChannel());
+            if (!processor.isMidiInputOpen()) status += " (not connected)";
+        }
         if (outputName.isNotEmpty())
         {
             if (status.isNotEmpty()) status += " | ";
             status += "OUT: " + outputName + " Ch" + juce::String(processor.getOutputChannel());
+            if (!processor.isMidiOutputOpen()) status += " (not connected)";
         }
     }
 

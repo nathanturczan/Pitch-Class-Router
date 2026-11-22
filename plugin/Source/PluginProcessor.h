@@ -44,8 +44,17 @@ public:
 
     void setMidiInput(const juce::String& deviceName);
     void setMidiOutput(const juce::String& deviceName);
+    // The selected device names; kept (and saved) even while the device is missing
     juce::String getCurrentMidiInput() const { return currentMidiInputName; }
     juce::String getCurrentMidiOutput() const { return currentMidiOutputName; }
+    bool isMidiInputOpen() const { return midiInputOpen.load(); }
+    bool isMidiOutputOpen() const { return midiOutputOpen.load(); }
+
+    // Reopens a selected device that has come back, closes one that has gone away
+    void refreshMidiConnections();
+
+    // Incremented when settings change behind the editor's back (state restore, device list change)
+    int getSettingsVersion() const { return settingsVersion.load(); }
 
     // Channel settings (1-16)
     void setInputChannel(int channel);
@@ -53,7 +62,7 @@ public:
     int getInputChannel() const { return inputChannel; }
     int getOutputChannel() const { return outputChannel; }
 
-    // Base CC (default 20, so C=CC20, C#=CC21, ..., B=CC31)
+    // Base CC (default 20, so C=CC20, C#=CC21, ..., B=CC31), limited to 0-108
     void setBaseCC(int cc);
     int getBaseCC() const { return baseCC; }
 
@@ -72,24 +81,43 @@ private:
     std::unique_ptr<juce::MidiOutput> midiOutput;
     juce::String currentMidiInputName;
     juce::String currentMidiOutputName;
+    std::atomic<bool> midiInputOpen { false };
+    std::atomic<bool> midiOutputOpen { false };
+    std::atomic<int> settingsVersion { 0 };
+    juce::MidiDeviceListConnection deviceListConnection;
 
     // Channel settings (1-16)
-    int inputChannel = 7;
-    int outputChannel = 8;
+    // Atomic: written by the UI, read by the MIDI-input thread
+    std::atomic<int> inputChannel { 7 };
+    std::atomic<int> outputChannel { 8 };
 
     // Base CC number for pitch class 0 (C)
-    int baseCC = 20;
+    std::atomic<int> baseCC { 20 };
 
     // Pitch class state (12 elements, one per pitch class)
-    std::array<bool, 12> pitchClassState;
+    std::array<std::atomic<bool>, 12> pitchClassState;
 
-    // Mutex for thread safety
+    // Notes currently held on the input channel; a pitch class is on while any of its notes is held
+    std::array<bool, 128> heldNotes {};
+
+    // Guards heldNotes and the input channel against changes while a note is being handled
+    juce::CriticalSection stateLock;
+
+    // Guards midiOutput (swapped by the UI while the MIDI-input thread sends to it)
+    juce::CriticalSection outputLock;
+
+    // Serialises the threads that queue CCs (MIDI input, UI); never taken in processBlock
     juce::CriticalSection midiLock;
 
-    // Pending MIDI messages to send in processBlock
-    juce::MidiBuffer pendingMidiMessages;
+    // Pending CCs to send in processBlock: fixed-size FIFO read lock-free by the audio thread
+    struct PendingCC { int channel, controller, value; };
+    static constexpr int pendingFifoSize = 1024;
+    juce::AbstractFifo pendingFifo { pendingFifoSize };
+    std::array<PendingCC, pendingFifoSize> pendingEvents {};
 
+    void queueForHost(int channel, int ccNumber, int value);
     void sendPitchClassCC(int pitchClass, bool isOn);
+    void resetPitchClassState();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchClassRouterProcessor)
 };

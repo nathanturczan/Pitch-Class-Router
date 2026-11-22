@@ -15,11 +15,18 @@ PitchClassRouterProcessor::PitchClassRouterProcessor()
                      .withInput("Input", juce::AudioChannelSet::stereo(), true)
                      .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
-    pitchClassState.fill(false);
+    for (auto& state : pitchClassState)
+        state.store(false);
+
+    // Retry a missing device when the system's MIDI device list changes
+    if (juce::MessageManager::getInstance()->isThisTheMessageThread())
+        deviceListConnection = juce::MidiDeviceListConnection::make([this] { refreshMidiConnections(); });
 }
 
 PitchClassRouterProcessor::~PitchClassRouterProcessor()
 {
+    deviceListConnection.reset();
+
     if (midiInput)
         midiInput->stop();
 }
@@ -52,11 +59,14 @@ void PitchClassRouterProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // Pass audio through unchanged (we're only processing MIDI)
     juce::ScopedNoDenormals noDenormals;
 
-    // Add any pending MIDI messages from external input
+    // Add any pending MIDI messages from external input (no lock on the audio thread)
     {
-        juce::ScopedLock lock(midiLock);
-        midiMessages.addEvents(pendingMidiMessages, 0, -1, 0);
-        pendingMidiMessages.clear();
+        const auto scope = pendingFifo.read(pendingFifo.getNumReady());
+        scope.forEach([&](int index)
+        {
+            const auto& cc = pendingEvents[(size_t) index];
+            midiMessages.addEvent(juce::MidiMessage::controllerEvent(cc.channel, cc.controller, cc.value), 0);
+        });
     }
 
     // Audio passthrough - nothing to do, buffer already contains input
@@ -73,9 +83,9 @@ void PitchClassRouterProcessor::getStateInformation(juce::MemoryBlock& destData)
     juce::ValueTree state("PitchClassRouterState");
     state.setProperty("midiInput", currentMidiInputName, nullptr);
     state.setProperty("midiOutput", currentMidiOutputName, nullptr);
-    state.setProperty("inputChannel", inputChannel, nullptr);
-    state.setProperty("outputChannel", outputChannel, nullptr);
-    state.setProperty("baseCC", baseCC, nullptr);
+    state.setProperty("inputChannel", inputChannel.load(), nullptr);
+    state.setProperty("outputChannel", outputChannel.load(), nullptr);
+    state.setProperty("baseCC", baseCC.load(), nullptr);
 
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
@@ -91,14 +101,16 @@ void PitchClassRouterProcessor::setStateInformation(const void* data, int sizeIn
         {
             juce::String inputName = state.getProperty("midiInput", "");
             juce::String outputName = state.getProperty("midiOutput", "");
-            inputChannel = state.getProperty("inputChannel", 7);
-            outputChannel = state.getProperty("outputChannel", 8);
-            baseCC = state.getProperty("baseCC", 20);
+            setInputChannel(state.getProperty("inputChannel", 7));
+            outputChannel = (int) state.getProperty("outputChannel", 8);
+            setBaseCC(state.getProperty("baseCC", 20));
 
             if (inputName.isNotEmpty())
                 setMidiInput(inputName);
             if (outputName.isNotEmpty())
                 setMidiOutput(outputName);
+
+            ++settingsVersion;
         }
     }
 }
@@ -110,38 +122,67 @@ void PitchClassRouterProcessor::handleIncomingMidiMessage(juce::MidiInput*,
     if (!message.isNoteOnOrOff())
         return;
 
+    juce::ScopedLock lock(stateLock);
+
     int channel = message.getChannel(); // 1-16
     if (channel != inputChannel)
         return;
 
     int noteNumber = message.getNoteNumber();
     int pitchClass = noteNumber % 12;
-    bool isOn = message.isNoteOn() && message.getVelocity() > 0;
+    heldNotes[(size_t) noteNumber] = message.isNoteOn() && message.getVelocity() > 0;
+
+    // The pitch class stays on while any note of that pitch class is still held
+    bool isOn = false;
+    for (int note = pitchClass; note < 128; note += 12)
+        isOn = isOn || heldNotes[(size_t) note];
 
     // Only send if state changed
-    if (pitchClassState[pitchClass] != isOn)
+    if (pitchClassState[(size_t) pitchClass].exchange(isOn) != isOn)
     {
-        pitchClassState[pitchClass] = isOn;
         sendPitchClassCC(pitchClass, isOn);
     }
+}
+
+void PitchClassRouterProcessor::resetPitchClassState()
+{
+    juce::ScopedLock lock(stateLock);
+
+    heldNotes.fill(false);
+
+    // Turn off whatever was on, so the target plugin does not keep stale toggles
+    for (int pitchClass = 0; pitchClass < 12; ++pitchClass)
+        if (pitchClassState[(size_t) pitchClass].exchange(false))
+            sendPitchClassCC(pitchClass, false);
 }
 
 void PitchClassRouterProcessor::sendPitchClassCC(int pitchClass, bool isOn)
 {
     int ccNumber = baseCC + pitchClass;
     int value = isOn ? 127 : 0;
+    int channel = outputChannel;
 
-    auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, value);
+    auto ccMessage = juce::MidiMessage::controllerEvent(channel, ccNumber, value);
 
     // Send to external MIDI output if configured
-    if (midiOutput)
-        midiOutput->sendMessageNow(ccMessage);
+    {
+        juce::ScopedLock lock(outputLock);
+        if (midiOutput)
+            midiOutput->sendMessageNow(ccMessage);
+    }
 
     // Also queue for plugin output (so it goes through DAW for MIDI mapping)
-    {
-        juce::ScopedLock lock(midiLock);
-        pendingMidiMessages.addEvent(ccMessage, 0);
-    }
+    queueForHost(channel, ccNumber, value);
+}
+
+void PitchClassRouterProcessor::queueForHost(int channel, int ccNumber, int value)
+{
+    juce::ScopedLock lock(midiLock);
+
+    // If the host is not calling processBlock and the FIFO is full, the event is dropped
+    const auto scope = pendingFifo.write(1);
+    if (scope.blockSize1 > 0)
+        pendingEvents[(size_t) scope.startIndex1] = { channel, ccNumber, value };
 }
 
 juce::StringArray PitchClassRouterProcessor::getAvailableMidiInputs() const
@@ -168,7 +209,12 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
         midiInput.reset();
     }
 
-    currentMidiInputName = "";
+    // Notes held on the previous device will never get their note-offs
+    resetPitchClassState();
+
+    // Remember the selection even if the device is missing, so it is not lost on the next save
+    currentMidiInputName = deviceName;
+    midiInputOpen = false;
 
     for (auto& device : juce::MidiInput::getAvailableDevices())
     {
@@ -178,33 +224,64 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
             if (midiInput)
             {
                 midiInput->start();
-                currentMidiInputName = deviceName;
+                midiInputOpen = true;
             }
             break;
         }
     }
 }
 
+void PitchClassRouterProcessor::refreshMidiConnections()
+{
+    if (currentMidiInputName.isNotEmpty()
+        && getAvailableMidiInputs().contains(currentMidiInputName) != midiInputOpen.load())
+        setMidiInput(currentMidiInputName);
+
+    if (currentMidiOutputName.isNotEmpty()
+        && getAvailableMidiOutputs().contains(currentMidiOutputName) != midiOutputOpen.load())
+        setMidiOutput(currentMidiOutputName);
+
+    ++settingsVersion;
+}
+
 void PitchClassRouterProcessor::setMidiOutput(const juce::String& deviceName)
 {
-    midiOutput.reset();
-    currentMidiOutputName = "";
+    // Open the new device first, then swap it in under the lock so the
+    // MIDI-input thread never sends to a device that is being destroyed
+    std::unique_ptr<juce::MidiOutput> newOutput;
 
     for (auto& device : juce::MidiOutput::getAvailableDevices())
     {
         if (device.name == deviceName)
         {
-            midiOutput = juce::MidiOutput::openDevice(device.identifier);
-            if (midiOutput)
-                currentMidiOutputName = deviceName;
+            newOutput = juce::MidiOutput::openDevice(device.identifier);
             break;
         }
     }
+
+    // Remember the selection even if the device is missing, so it is not lost on the next save
+    currentMidiOutputName = deviceName;
+    midiOutputOpen = newOutput != nullptr;
+
+    {
+        juce::ScopedLock lock(outputLock);
+        std::swap(midiOutput, newOutput);
+    }
+    // The previous device (now in newOutput) is closed here, outside the lock
 }
 
 void PitchClassRouterProcessor::setInputChannel(int channel)
 {
-    inputChannel = juce::jlimit(1, 16, channel);
+    channel = juce::jlimit(1, 16, channel);
+
+    juce::ScopedLock lock(stateLock);
+
+    if (channel == inputChannel)
+        return;
+
+    // Notes held on the previous channel will never get their note-offs
+    resetPitchClassState();
+    inputChannel = channel;
 }
 
 void PitchClassRouterProcessor::setOutputChannel(int channel)
@@ -214,7 +291,7 @@ void PitchClassRouterProcessor::setOutputChannel(int channel)
 
 void PitchClassRouterProcessor::setBaseCC(int cc)
 {
-    baseCC = juce::jlimit(0, 119, cc); // Max CC119 so CC+11 doesn't exceed 127
+    baseCC = juce::jlimit(0, 108, cc); // Max CC108 so CC+11 stays below the channel-mode messages (CC 120-127)
 }
 
 void PitchClassRouterProcessor::sendMappingCC(int pitchClass)
@@ -224,22 +301,23 @@ void PitchClassRouterProcessor::sendMappingCC(int pitchClass)
 
     // Send CC with value 127 for mapping purposes
     int ccNumber = baseCC + pitchClass;
-    auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, 127);
-
-    if (midiOutput)
-        midiOutput->sendMessageNow(ccMessage);
+    int channel = outputChannel;
+    auto ccMessage = juce::MidiMessage::controllerEvent(channel, ccNumber, 127);
 
     {
-        juce::ScopedLock lock(midiLock);
-        pendingMidiMessages.addEvent(ccMessage, 0);
+        juce::ScopedLock lock(outputLock);
+        if (midiOutput)
+            midiOutput->sendMessageNow(ccMessage);
     }
+
+    queueForHost(channel, ccNumber, 127);
 }
 
 bool PitchClassRouterProcessor::getPitchClassState(int pitchClass) const
 {
     if (pitchClass < 0 || pitchClass > 11)
         return false;
-    return pitchClassState[pitchClass];
+    return pitchClassState[(size_t) pitchClass].load();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

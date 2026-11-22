@@ -36,6 +36,13 @@ cmake --build build
 
 Requires CMake 3.22+ and a C++17 compiler. JUCE is fetched automatically.
 
+This builds VST3, AU, and Standalone targets. On macOS, the build also copies the AU and VST3 into `~/Library/Audio/Plug-Ins/` as a post-build step, and the installed plugins need to be signed (ad-hoc signing is enough for local use) before a host will load them:
+
+```bash
+codesign --force --deep --sign - ~/Library/Audio/Plug-Ins/Components/Pitch\ Class\ Router.component
+codesign --force --deep --sign - ~/Library/Audio/Plug-Ins/VST3/Pitch\ Class\ Router.vst3
+```
+
 ### Web Version (Lightweight)
 
 A browser-based version using WebMIDI. Just open `index.html` in Chrome.
@@ -63,7 +70,7 @@ Any plugin with 12 pitch-class toggles that can be MIDI-mapped:
 
 ### 2. Load Pitch Class Router
 
-**Plugin version:** Load Pitch Class Router on a MIDI track. Select your virtual MIDI port and channels in the plugin UI.
+**Plugin version:** Load Pitch Class Router on a MIDI track. Select your virtual MIDI port and channels in the plugin UI. The plugin listens only to the MIDI port selected in its UI; MIDI arriving from the host track is not used.
 
 **Web version:** Open `index.html` in Chrome. Edit `pitch-class-router.js` to set your port name.
 
