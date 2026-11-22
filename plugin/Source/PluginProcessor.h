@@ -74,14 +74,18 @@ private:
     juce::String currentMidiOutputName;
 
     // Channel settings (1-16)
-    int inputChannel = 7;
-    int outputChannel = 8;
+    // Atomic: written by the UI, read by the MIDI-input thread
+    std::atomic<int> inputChannel { 7 };
+    std::atomic<int> outputChannel { 8 };
 
     // Base CC number for pitch class 0 (C)
-    int baseCC = 20;
+    std::atomic<int> baseCC { 20 };
 
     // Pitch class state (12 elements, one per pitch class)
-    std::array<bool, 12> pitchClassState;
+    std::array<std::atomic<bool>, 12> pitchClassState;
+
+    // Guards midiOutput (swapped by the UI while the MIDI-input thread sends to it)
+    juce::CriticalSection outputLock;
 
     // Mutex for thread safety
     juce::CriticalSection midiLock;

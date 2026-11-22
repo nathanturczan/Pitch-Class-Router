@@ -15,7 +15,8 @@ PitchClassRouterProcessor::PitchClassRouterProcessor()
                      .withInput("Input", juce::AudioChannelSet::stereo(), true)
                      .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
-    pitchClassState.fill(false);
+    for (auto& state : pitchClassState)
+        state.store(false);
 }
 
 PitchClassRouterProcessor::~PitchClassRouterProcessor()
@@ -73,9 +74,9 @@ void PitchClassRouterProcessor::getStateInformation(juce::MemoryBlock& destData)
     juce::ValueTree state("PitchClassRouterState");
     state.setProperty("midiInput", currentMidiInputName, nullptr);
     state.setProperty("midiOutput", currentMidiOutputName, nullptr);
-    state.setProperty("inputChannel", inputChannel, nullptr);
-    state.setProperty("outputChannel", outputChannel, nullptr);
-    state.setProperty("baseCC", baseCC, nullptr);
+    state.setProperty("inputChannel", inputChannel.load(), nullptr);
+    state.setProperty("outputChannel", outputChannel.load(), nullptr);
+    state.setProperty("baseCC", baseCC.load(), nullptr);
 
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
@@ -91,8 +92,8 @@ void PitchClassRouterProcessor::setStateInformation(const void* data, int sizeIn
         {
             juce::String inputName = state.getProperty("midiInput", "");
             juce::String outputName = state.getProperty("midiOutput", "");
-            inputChannel = state.getProperty("inputChannel", 7);
-            outputChannel = state.getProperty("outputChannel", 8);
+            inputChannel = (int) state.getProperty("inputChannel", 7);
+            outputChannel = (int) state.getProperty("outputChannel", 8);
             setBaseCC(state.getProperty("baseCC", 20));
 
             if (inputName.isNotEmpty())
@@ -119,9 +120,8 @@ void PitchClassRouterProcessor::handleIncomingMidiMessage(juce::MidiInput*,
     bool isOn = message.isNoteOn() && message.getVelocity() > 0;
 
     // Only send if state changed
-    if (pitchClassState[pitchClass] != isOn)
+    if (pitchClassState[(size_t) pitchClass].exchange(isOn) != isOn)
     {
-        pitchClassState[pitchClass] = isOn;
         sendPitchClassCC(pitchClass, isOn);
     }
 }
@@ -134,8 +134,11 @@ void PitchClassRouterProcessor::sendPitchClassCC(int pitchClass, bool isOn)
     auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, value);
 
     // Send to external MIDI output if configured
-    if (midiOutput)
-        midiOutput->sendMessageNow(ccMessage);
+    {
+        juce::ScopedLock lock(outputLock);
+        if (midiOutput)
+            midiOutput->sendMessageNow(ccMessage);
+    }
 
     // Also queue for plugin output (so it goes through DAW for MIDI mapping)
     {
@@ -187,19 +190,26 @@ void PitchClassRouterProcessor::setMidiInput(const juce::String& deviceName)
 
 void PitchClassRouterProcessor::setMidiOutput(const juce::String& deviceName)
 {
-    midiOutput.reset();
-    currentMidiOutputName = "";
+    // Open the new device first, then swap it in under the lock so the
+    // MIDI-input thread never sends to a device that is being destroyed
+    std::unique_ptr<juce::MidiOutput> newOutput;
 
     for (auto& device : juce::MidiOutput::getAvailableDevices())
     {
         if (device.name == deviceName)
         {
-            midiOutput = juce::MidiOutput::openDevice(device.identifier);
-            if (midiOutput)
-                currentMidiOutputName = deviceName;
+            newOutput = juce::MidiOutput::openDevice(device.identifier);
             break;
         }
     }
+
+    currentMidiOutputName = newOutput ? deviceName : juce::String();
+
+    {
+        juce::ScopedLock lock(outputLock);
+        std::swap(midiOutput, newOutput);
+    }
+    // The previous device (now in newOutput) is closed here, outside the lock
 }
 
 void PitchClassRouterProcessor::setInputChannel(int channel)
@@ -226,8 +236,11 @@ void PitchClassRouterProcessor::sendMappingCC(int pitchClass)
     int ccNumber = baseCC + pitchClass;
     auto ccMessage = juce::MidiMessage::controllerEvent(outputChannel, ccNumber, 127);
 
-    if (midiOutput)
-        midiOutput->sendMessageNow(ccMessage);
+    {
+        juce::ScopedLock lock(outputLock);
+        if (midiOutput)
+            midiOutput->sendMessageNow(ccMessage);
+    }
 
     {
         juce::ScopedLock lock(midiLock);
@@ -239,7 +252,7 @@ bool PitchClassRouterProcessor::getPitchClassState(int pitchClass) const
 {
     if (pitchClass < 0 || pitchClass > 11)
         return false;
-    return pitchClassState[pitchClass];
+    return pitchClassState[(size_t) pitchClass].load();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
